@@ -312,7 +312,10 @@ class AsyncResult(ResultBase):
         If the task is still running, pending, or is waiting
         for retry then :const:`False` is returned.
         """
-        return self.state in self.backend.READY_STATES
+        return (
+            self.state in self.backend.READY_STATES or
+            any(p.state in states.PROPAGATE_STATES for p in self._parents())
+        )
 
     def successful(self):
         """Return :const:`True` if the task executed successfully."""
@@ -331,6 +334,9 @@ class AsyncResult(ResultBase):
             cache['status'], cache['result'], cache.get('traceback'))
         if state in states.PROPAGATE_STATES and propagate:
             self.throw(value, self._to_remote_traceback(tb))
+        elif state in states.UNREADY_STATES:
+            for node in self._parents():
+                node.maybe_throw(propagate=propagate, callback=callback)
         if callback is not None:
             callback(self.id, value)
         return value

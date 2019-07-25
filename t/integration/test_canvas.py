@@ -73,6 +73,24 @@ class test_chain:
         with pytest.raises(ExpectedException):
             res.parent.get(propagate=True)
 
+    def test_chord_of_chains_on_error(self, manager):
+        from .tasks import ExpectedException
+
+        if not manager.app.conf.result_backend.startswith('redis'):
+            raise pytest.skip('Requires redis result backend.')
+
+        # Run the chord and wait for the error callback to finish.
+        c1 = chain(
+            add.s(1, 2), fail.s(), add.s(3, 4),
+        )
+        c2 = chain(
+            add.s(1, 2), add.s(3), add.s(4),
+        )
+        res = chord([c1, c2], tsum.s()).delay()
+
+        with pytest.raises(ExpectedException):
+            res.get(propagate=True, timeout=TIMEOUT)
+
     @flaky
     def test_chain_inside_group_receives_arguments(self, manager):
         c = (

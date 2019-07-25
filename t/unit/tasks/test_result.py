@@ -392,6 +392,19 @@ class test_AsyncResult:
 
         assert not self.app.AsyncResult(uuid()).ready()
 
+    def test_ready_with_parent(self):
+        success = self.app.AsyncResult(self.task2['id'])
+        failure = self.app.AsyncResult(self.task3['id'])
+        unready = self.app.AsyncResult(self.task4['id'])
+
+        assert not unready.ready()
+
+        unready.parent = failure
+        assert unready.ready()
+
+        unready.parent = success
+        assert not unready.ready()
+
     def test_del(self):
         with patch('celery.result.AsyncResult.backend') as backend:
             result = self.app.AsyncResult(self.task1['id'])
@@ -891,6 +904,39 @@ class test_GroupResult:
         self.ts.results[0].maybe_throw.assert_called_with(
             callback=None, propagate=True,
         )
+
+    @staticmethod
+    def assert_called_n_times(mock, n):
+        try:
+            assert mock.call_count == n, \
+                "Expected '%s' to have been called %d time(s), but was " \
+                "called %d time(s)" % (mock._mock_name, n, mock.call_count)
+        finally:
+            mock.call_count = 0
+
+    def test_maybe_throw_with_parent_failures(self):
+        t1 = mock_task('t1', states.SUCCESS, 'the')
+        t2 = mock_task('t1', states.FAILURE, KeyError('quick'))
+        for task in (t1, t2):
+            save_result(self.app, task)
+
+        success = self.app.AsyncResult(t1['id'])
+        failure = self.app.AsyncResult(t2['id'])
+        unready = self.app.AsyncResult(uuid())
+
+        callback = Mock(name='mock_callback')
+        unready.parent = success
+        self.ts.results = [unready]
+        self.ts.maybe_throw(propagate=True, callback=callback)
+        self.assert_called_n_times(callback, 2)
+
+        unready.parent = failure
+        self.ts.results = [unready]
+        self.ts.maybe_throw(propagate=False, callback=callback)
+        self.assert_called_n_times(callback, 2)
+        with pytest.raises(KeyError, match='quick'):
+            self.ts.maybe_throw(propagate=True, callback=callback)
+            self.assert_called_n_times(callback, 2)
 
     def test_join__on_message(self):
         with pytest.raises(ImproperlyConfigured):
